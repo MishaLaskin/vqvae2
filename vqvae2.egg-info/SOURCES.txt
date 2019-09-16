@@ -1,0 +1,9 @@
+setup.py
+vqvae2/__init__.py
+vqvae2/config.py
+vqvae2/main.py
+vqvae2/utils.py
+vqvae2.egg-info/PKG-INFO
+vqvae2.egg-info/SOURCES.txt
+vqvae2.egg-info/dependency_links.txt
+vqvae2.egg-info/top_level.txt
