@@ -155,13 +155,21 @@ class ConvVQVAETrainer(object):
         self.imlength = model.imlength
 
         self.lr = lr
-        params = list(self.model.parameters())
+        # keep VQVAE params only
+        params = []
+        pixel_params = []
+        for p in model.named_parameters():
+            if 'pixelcnn' in p[0]:
+                pixel_params.append(p[1])
+            else:
+                params.append(p[1])
+
         self.optimizer = optim.Adam(params,
                                     lr=self.lr,
                                     weight_decay=weight_decay,
                                     )
         self.pixelcnn_opt = optim.Adam(
-            self.pixelcnn.parameters(), lr=self.lr, weight_decay=weight_decay, amsgrad=True)
+            pixel_params, lr=self.lr, weight_decay=weight_decay, amsgrad=True)
         self.pixelcnn_criterion = nn.CrossEntropyLoss().to(ptu.device)
 
         self.train_dataset, self.test_dataset = train_dataset, test_dataset
@@ -246,16 +254,19 @@ class ConvVQVAETrainer(object):
     def one_pixelcnn_optimization_step(self, z_batch):
         criterion = self.pixelcnn_criterion
 
-        labels = torch.ones(z_batch.shape[0]).long().to(ptu.device)
+        labels = torch.zeros(z_batch.shape[0]).long().to(ptu.device)
+        #print('data in', z_batch.shape, labels.shape)
+
         z_batch = (z_batch[:, 0]).long().to(ptu.device)
 
         # Train PixelCNN with images
         logits = self.pixelcnn(z_batch, labels)
-
+        #print('og logits', logits.shape)
         logits = logits.permute(0, 2, 3, 1).contiguous()
         # CHANGE THIS LATER should be in architeture
         n_embeddings = 64
-
+        #print('data and logits', z_batch.shape, labels.shape, logits.shape)
+        #assert False
         loss = criterion(
             logits.view(-1, n_embeddings),
             z_batch.view(-1)
@@ -289,7 +300,17 @@ class ConvVQVAETrainer(object):
         binaries = binaries.view(
             self.batch_size, 1, z_dim, z_dim).to(ptu.device)
 
+        """
+        Change this to
+        1. if VQ VAE is good
+        2. if there is no existing pixelcnn file
+
+        - run function to train gated pixel cnn as in gated_pixelcnn.py
+        - then load the resulting pixel cnn into GatedPix... class 
+        - use that to generate goals autoregressively
+        """
         pix_loss = self.one_pixelcnn_optimization_step(binaries)
+        #pix_loss = torch.tensor(-1)
         return recon_loss.item(), loss.item(), pix_loss.item(), perplexity.item()
 
     def get_batch(self, train=True, epoch=None):
@@ -482,8 +503,25 @@ class ConvVQVAETrainer(object):
 
     def dump_samples(self, epoch):
         self.model.eval()
-        sample = ptu.randn(64, self.representation_size)
-        sample = self.model.decode(sample)[0].cpu()
+        # set gpu device explicitly
+        label = torch.tensor(np.zeros(64)).long().to(ptu.device)
+
+        #sample1 = ptu.randn(64, self.representation_size)
+        #sample2 = self.model.decode(sample1)[0].cpu()
+        sample = self.model.pixelcnn.generate(label, (3, 3), 64).cpu()
+
+        e_indices = torch.tensor(sample).reshape(-1, 1).long().to(ptu.device)
+
+        min_encodings = torch.zeros(e_indices.shape[0], 64).to(ptu.device)
+        min_encodings.scatter_(1, e_indices, 1)
+        e_weights = self.model.vector_quantization.embedding.weight
+        z_q = torch.matmul(min_encodings, e_weights).view((64, 3, 3, 2))
+        z_q = z_q.permute(0, 3, 1, 2).contiguous()
+        z_q = self.model.pre_dequantization_conv(z_q)
+        x_recon = self.model.decoder(z_q)
+        sample = x_recon.view(64, -1)
+        #print(sample1.shape, sample2.shape, sample.shape, x_recon.shape)
+        #assert False
         save_dir = osp.join(logger.get_snapshot_dir(), 's%d.png' % epoch)
         save_image(
             sample.data.view(64, self.input_channels,

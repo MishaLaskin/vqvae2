@@ -126,7 +126,7 @@ class GatedPixelCNN(nn.Module):
 
         return self.output_conv(x_h)
 
-    def generate(self, label, shape=(8, 8), batch_size=64):
+    def generate(self, label, shape=(3, 3), batch_size=64):
         param = next(self.parameters())
         x = torch.zeros(
             (batch_size, *shape),

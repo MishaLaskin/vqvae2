@@ -21,7 +21,7 @@ timestamp = readable_timestamp()
 
 
 parser.add_argument("--batch_size", type=int, default=512)
-parser.add_argument("--n_updates", type=int, default=int(1e5))
+parser.add_argument("--n_updates", type=int, default=int(1e4))
 # parser.add_argument("--n_hiddens", type=int, default=128)
 # parser.add_argument("--n_residual_hiddens", type=int, default=32)
 # parser.add_argument("--n_residual_layers", type=int, default=2)
@@ -39,9 +39,9 @@ parser.add_argument("--pix_layers", type=int, default=15)
 parser.add_argument("-save", action="store_true")
 # parser.add_argument("-temporal", action="store_true")
 parser.add_argument("--saved_name",  type=str,
-                    default='/home/misha/research/data/saved_models/vqvae_pix_sawyer_push_medium_48.pth')
+                    default='/home/misha/research/data/saved_models/vqvae_pix_sawyer_push_rot3_48.pth')
 parser.add_argument("--data_file_path", type=str,
-                    default='/home/misha/research/data/paths/sawyer_push_medium_48.npy')
+                    default='/home/misha/research/data/paths/sawyer_push_rot3_48.npy')
 args = parser.parse_args()
 
 

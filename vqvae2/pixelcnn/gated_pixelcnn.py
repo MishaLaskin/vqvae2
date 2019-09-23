@@ -25,7 +25,7 @@ Hyperparameters
 """
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--batch_size", type=int, default=32)
+parser.add_argument("--batch_size", type=int, default=64)
 parser.add_argument("--epochs", type=int, default=100)
 parser.add_argument("--log_interval", type=int, default=100)
 parser.add_argument("-save", action="store_true")
@@ -35,9 +35,9 @@ parser.add_argument("--dataset",  type=str, default='LATENT_BLOCK',
                     help='accepts CIFAR10 | MNIST | FashionMNIST | LATENT_BLOCK')
 
 parser.add_argument("--data_file_path", type=str,
-                    default='/home/misha/research/data/paths/latent_sawyer_push_medium_48.npy')
+                    default='/home/misha/research/data/paths/sawyer_push_rot3_48.npy')
 parser.add_argument("--save_path", type=str,
-                    default='/home/misha/research/data/saved_models/xxxxx_pixelcnn_sawyer_push_medium_48.npy')
+                    default='/home/misha/research/data/saved_models/x_pixelcnn_sawyer_push_0918_48.npy')
 
 parser.add_argument("--num_workers", type=int, default=4)
 parser.add_argument("--img_dim", type=int, default=3)
@@ -46,7 +46,7 @@ parser.add_argument("--input_dim", type=int, default=1,
 parser.add_argument("--n_embeddings", type=int, default=64,
                     help='number of embeddings from VQ VAE')
 parser.add_argument("--n_layers", type=int, default=15)
-parser.add_argument("--learning_rate", type=float, default=3e-4)
+parser.add_argument("--learning_rate", type=float, default=1e-3)
 
 args = parser.parse_args()
 
@@ -81,7 +81,7 @@ def train():
     train_loss = []
     for batch_idx, (x, label) in enumerate(dataloader):
 
-        print(x.shape)
+        # print(x.shape)
 
         start_time = time.time()
         if args.dataset == 'LATENT_BLOCK':
@@ -93,9 +93,9 @@ def train():
         # Train PixelCNN with images
         logits = model(x, label)
 
-        print(x.shape, label.shape)
-        print(logits.shape)
-        assert False
+        #print(x.shape, label.shape)
+        # print(logits.shape)
+        #assert False
         logits = logits.permute(0, 2, 3, 1).contiguous()
 
         loss = criterion(
@@ -123,15 +123,21 @@ def test():
     val_loss = []
     with torch.no_grad():
         for batch_idx, (x, label) in enumerate(dataloader):
+            #print('data in', x.shape, label.shape)
+
             if args.dataset == 'LATENT_BLOCK':
                 x = (x[:, 0]).cuda()
             else:
                 x = (x[:, 0] * (args.n_embeddings-1)).long().cuda()
-            label = label.cuda()
+            label = label.long().cuda()
 
             logits = model(x, label)
 
+            #print('og logits', logits.shape)
+
             logits = logits.permute(0, 2, 3, 1).contiguous()
+            #print('data and logits', x.shape, label.shape, logits.shape)
+            #assert False
             loss = criterion(
                 logits.view(-1, args.n_embeddings),
                 x.view(-1)
@@ -147,13 +153,13 @@ def test():
 
 
 def generate_samples(epoch):
-    label = torch.arange(10).expand(10, 10).contiguous().view(-1)
+    label = torch.zeros(10).expand(10, 10).contiguous().view(-1)
     label = label.long().cuda()
 
     x_tilde = model.generate(label, shape=(
         args.img_dim, args.img_dim), batch_size=100)
 
-    print(x_tilde[0])
+    # print(x_tilde[0])
 
 
 BEST_LOSS = 999
@@ -163,7 +169,7 @@ for epoch in range(1, args.epochs):
     train()
     cur_loss = test()
 
-    if args.save or cur_loss <= BEST_LOSS:
+    if True or (args.save or cur_loss <= BEST_LOSS):
         BEST_LOSS = cur_loss
         LAST_SAVED = epoch
 

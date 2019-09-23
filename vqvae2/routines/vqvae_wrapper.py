@@ -11,6 +11,7 @@ import rlkit.torch.pytorch_util as ptu
 from multiworld.core.multitask_env import MultitaskEnv
 from multiworld.envs.env_util import get_stat_in_paths, create_stats_ordered_dict
 from rlkit.envs.wrappers import ProxyEnv
+from copy import copy
 
 
 class VQVAEWrappedEnv(ProxyEnv, MultitaskEnv):
@@ -34,7 +35,7 @@ class VQVAEWrappedEnv(ProxyEnv, MultitaskEnv):
         imsize=84,
         obs_size=None,
         norm_order=2,
-        epsilon=20,
+        epsilon=2,
         presampled_goals=None,
 
     ):
@@ -93,7 +94,9 @@ class VQVAEWrappedEnv(ProxyEnv, MultitaskEnv):
         self._initial_obs = None
         self._custom_goal_sampler = None
         self._goal_sampling_mode = goal_sampling_mode
-
+        self.running_obs_mean = np.zeros(self.representation_size)+1e-3
+        self.running_obs_std = np.zeros(self.representation_size)+1e-3
+        self.running_k = 1
         #assert False, 'Using VQVAE'
 
     def reset(self):
@@ -138,15 +141,56 @@ class VQVAEWrappedEnv(ProxyEnv, MultitaskEnv):
         # assert (latent_obs == obs['latent_observation']).all()
         latent_goal = self.desired_goal['latent_desired_goal']
         dist = latent_goal - latent_obs
-        var = np.exp(logvar.flatten())
-        var = np.maximum(var, self.reward_min_variance)
+        #var = np.exp(logvar.flatten())
+        #var = np.maximum(var, self.reward_min_variance)
+
+        # m_k = m_{k-1} + (x_k-m_{k-1})/k
+        m_k_prev = self.running_obs_mean.copy()
+        x_k = latent_obs
+        k = self.running_k
+        m_k = m_k_prev + (x_k - m_k_prev)/k
+
+        # s_k = s_{k-1} + (x-m_{k-1})*(x-m_{k})
+
+        s_k_prev = self.running_obs_std.copy()
+        s_k = s_k_prev + (x_k - m_k_prev)*(x_k - m_k)
+
+        # var = s_k / (k-1) if k >= 2
+
+        var = s_k / np.max([1, k-1])
+        self.running_obs_mean = m_k
+        self.running_obs_std = s_k
+        self.running_k = k + 1
+
+        #print('m_k', self.running_obs_mean)
+        #print('s_k', self.running_obs_std)
+        #print('k', self.running_k)
+
         err = dist * dist / 2 / var
         mdist = np.sum(err)  # mahalanobis distance
+        #print('err', err)
+        #print('mdist', mdist)
+
+        # get the right bits
+        b1 = self.discretize_z(latent_obs)
+        b2 = self.discretize_z(latent_goal)
+        bits_matched = np.sum(b1 == b2)/len(b1)
+
         info["vae_mdist"] = mdist
-        info["vae_success"] = 1 if mdist < self.epsilon else 0
         info["vae_dist"] = np.linalg.norm(dist, ord=self.norm_order)
         info["vae_dist_l1"] = np.linalg.norm(dist, ord=1)
         info["vae_dist_l2"] = np.linalg.norm(dist, ord=2)
+        info["vae_success"] = 1 if mdist < self.epsilon else 0
+        info['bits_matched'] = bits_matched
+        if False:
+
+            print('latent goal', latent_goal)
+            print('latent obs', latent_obs)
+            print('dist', dist)
+            for k, v in info.items():
+                print(k, v)
+            print('margin', self.epsilon)
+            assert False
 
     """
     Multitask functions
@@ -226,9 +270,19 @@ class VQVAEWrappedEnv(ProxyEnv, MultitaskEnv):
         elif self.reward_type == 'latent_sparse':
             achieved_goals = obs['latent_achieved_goal']
             desired_goals = obs['latent_desired_goal']
-            dist = np.linalg.norm(
-                desired_goals - achieved_goals, ord=self.norm_order, axis=1)
-            reward = 0 if dist < self.epsilon else -1
+
+            # np.linalg.norm(desired_goals - achieved_goals, ord=self.norm_order, axis=1)
+            dist = desired_goals - achieved_goals
+
+            var = self.running_obs_std / np.max([1, self.running_k-1])
+
+            #print('dist', dist.shape)
+            #print('var', var.shape)
+            errs = dist**2 / 2 / var[None, :]
+            mdists = np.sum(errs, 1)
+
+            #print('mdists', mdists.shape, mdists)
+            reward = np.array([0 if d < self.epsilon else -1 for d in mdists])
             return reward
         elif self.reward_type == 'state_distance':
             achieved_goals = obs['state_achieved_goal']
@@ -387,6 +441,16 @@ class VQVAEWrappedEnv(ProxyEnv, MultitaskEnv):
             cv2.imshow('goal', goal)
             cv2.waitKey(1)
 
+    def discretize_z(self, z):
+        z_dim = self.vae.z_dim
+
+        #vq_encoder_output = model.pre_quantization_conv(model.encoder(x))
+        z = torch.tensor(z).float().to(ptu.device)
+        z = z.view(1, 2, z_dim, z_dim)
+        _, _, _, _, e_indices = self.vae.vector_quantization(z)
+        b = e_indices.detach().cpu().view(-1).numpy()
+        return b
+
     def _sample_vae_prior(self, batch_size):
         """
         if self.sample_from_true_prior:
@@ -395,12 +459,16 @@ class VQVAEWrappedEnv(ProxyEnv, MultitaskEnv):
             mu, sigma = self.vae.dist_mu, self.vae.dist_std
         n = np.random.randn(batch_size, self.representation_size)
         """
+
         z_dim = self.vae.z_dim
-        labels = torch.ones(batch_size).long().to(ptu.device)
+        labels = torch.zeros(batch_size).long().to(ptu.device)
+
         samples = self.vae.pixelcnn.generate(
             labels, shape=(z_dim, z_dim), batch_size=batch_size)
         samples = torch.tensor(samples).reshape(-1, 1).long().to(ptu.device)
+
         #print('samples', samples, samples.shape)
+
         e_weights = self.vae.vector_quantization.embedding.weight
         weight_dim = np.sqrt(e_weights.shape[0]).astype(np.int32)
         min_encodings = torch.zeros(
