@@ -17,8 +17,7 @@ class VQVAE(nn.Module):
                  n_embeddings, embedding_dim, beta, gpu_id=0, input_channels=3, verbose=False, with_pixelcnn=True):
         super(VQVAE, self).__init__()
         # encode image into continuous latent space
-        self.device = torch.device(
-            "cuda:" + str(gpu_id) if torch.cuda.is_available() else "cpu")
+   
         self.imsize = imsize
         self.input_channels = input_channels
         self.imlength = self.imsize * self.imsize * self.input_channels

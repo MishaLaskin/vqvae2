@@ -11,7 +11,6 @@ import rlkit.torch.pytorch_util as ptu
 from multiworld.core.multitask_env import MultitaskEnv
 from multiworld.envs.env_util import get_stat_in_paths, create_stats_ordered_dict
 from rlkit.envs.wrappers import ProxyEnv
-from copy import copy
 
 
 class VQVAEWrappedEnv(ProxyEnv, MultitaskEnv):
