@@ -173,7 +173,7 @@ class VQVAEWrappedEnv(ProxyEnv, MultitaskEnv):
         # get the right bits
         b1 = self.discretize_z(latent_obs)
         b2 = self.discretize_z(latent_goal)
-        bits_matched = np.sum(b1 == b2)/len(b1)
+        bits_matched = np.sum(b1 == b2)/(self.vae.z_dim**2)
 
         info["vae_mdist"] = mdist
         info["vae_dist"] = np.linalg.norm(dist, ord=self.norm_order)
@@ -280,8 +280,20 @@ class VQVAEWrappedEnv(ProxyEnv, MultitaskEnv):
             errs = dist**2 / 2 / var[None, :]
             mdists = np.sum(errs, 1)
 
+            n = achieved_goals.shape[0]
+            b1 = self.discretize_z(achieved_goals, n)
+            b2 = self.discretize_z(desired_goals, n)
+            bit_mask = b1 == b2
+            bits_matched = np.sum(bit_mask, axis=1)
+
             #print('mdists', mdists.shape, mdists)
-            reward = np.array([0 if d < self.epsilon else -1 for d in mdists])
+            # l2
+            # reward = np.array(
+            #    [0 if d < self.epsilon else -1 for d in np.linalg.norm(dist, axis=1)])
+            # mdist
+            # reward = np.array(
+            #    [0 if d < self.epsilon else -1 for d in np.linalg.norm(dist, axis=1)])
+            reward = (1.*bits_matched/(self.vae.z_dim**2) - 1.)
             return reward
         elif self.reward_type == 'state_distance':
             achieved_goals = obs['state_achieved_goal']
@@ -440,14 +452,15 @@ class VQVAEWrappedEnv(ProxyEnv, MultitaskEnv):
             cv2.imshow('goal', goal)
             cv2.waitKey(1)
 
-    def discretize_z(self, z):
+    def discretize_z(self, z, batch_size=1):
         z_dim = self.vae.z_dim
 
         #vq_encoder_output = model.pre_quantization_conv(model.encoder(x))
         z = torch.tensor(z).float().to(ptu.device)
-        z = z.view(1, 2, z_dim, z_dim)
+        z = z.view(batch_size, 2, z_dim, z_dim)
         _, _, _, _, e_indices = self.vae.vector_quantization(z)
-        b = e_indices.detach().cpu().view(-1).numpy()
+
+        b = e_indices.detach().cpu().view(batch_size, -1).numpy()
         return b
 
     def _sample_vae_prior(self, batch_size):

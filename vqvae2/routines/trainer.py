@@ -153,7 +153,8 @@ class ConvVQVAETrainer(object):
 
         self.input_channels = model.input_channels
         self.imlength = model.imlength
-
+        self.skew_dataset = False
+        self._train_weights = None
         self.lr = lr
         # keep VQVAE params only
         params = []
@@ -494,6 +495,7 @@ class ConvVQVAETrainer(object):
         stats['debug/MSE of reconstruction'] = ptu.get_numpy(
             recon_mse
         )[0]
+        self.skew_dataset = False
         if self.skew_dataset:
             stats.update(create_stats_ordered_dict(
                 'train weight',
